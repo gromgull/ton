@@ -306,15 +306,17 @@ class AccountState {
   td::Result<tonlib_api::object_ptr<tonlib_api::raw_fullAccountState>> to_raw_fullAccountState() const {
     auto state = get_smc_state();
     std::string code;
+    std::string code_hash;
     if (state.code.not_null()) {
       code = to_bytes(state.code);
+      code_hash = state.code->get_hash().as_slice().str();
     }
     std::string data;
     if (state.data.not_null()) {
       data = to_bytes(state.data);
     }
     return tonlib_api::make_object<tonlib_api::raw_fullAccountState>(
-        get_balance(), std::move(code), std::move(data), to_transaction_id(raw().info), to_tonlib_api(raw().block_id),
+        get_balance(), std::move(code), std::move(code_hash), std::move(data), to_transaction_id(raw().info), to_tonlib_api(raw().block_id),
         raw().frozen_hash, get_sync_time());
   }
 
@@ -2955,16 +2957,20 @@ struct ToRawTransactions {
     }
     auto body_cell = vm::CellBuilder().append_cellslice(*body).finalize();
     auto body_hash = body_cell->get_hash().as_slice().str();
+    auto msg_hash = cell->get_hash().as_slice().str();
+    
+    auto& init_state_cs = message.init.write();
+    bool has_init_state = init_state_cs.fetch_ulong(1) == 1;
 
     td::Ref<vm::Cell> init_state_cell;
-    auto& init_state_cs = message.init.write();
-    if (init_state_cs.fetch_ulong(1) == 1) {
-      if (init_state_cs.fetch_long(1) == 0) {
-        init_state_cell = vm::CellBuilder().append_cellslice(init_state_cs).finalize();
-      } else {
-        init_state_cell = init_state_cs.fetch_ref();
-      }
-    }
+    // auto& init_state_cs = message.init.write();
+    // if (init_state_cs.fetch_ulong(1) == 1) {
+    //   if (init_state_cs.fetch_long(1) == 0) {
+    //     init_state_cell = vm::CellBuilder().append_cellslice(init_state_cs).finalize();
+    //   } else {
+    //     init_state_cell = init_state_cs.fetch_ref();
+    //   }
+    // }
 
     auto get_data = [body = std::move(body), body_cell = std::move(body_cell),
                      init_state_cell = std::move(init_state_cell), this](td::Slice salt) mutable {
@@ -3023,9 +3029,10 @@ struct ToRawTransactions {
         auto created_lt = static_cast<td::int64>(msg_info.created_lt);
 
         return tonlib_api::make_object<tonlib_api::raw_message>(
+            msg_hash,
             tonlib_api::make_object<tonlib_api::accountAddress>(src),
             tonlib_api::make_object<tonlib_api::accountAddress>(std::move(dest)), balance, fwd_fee, ihr_fee, created_lt,
-            std::move(body_hash), get_data(src));
+            std::move(body_hash), get_data(src), msg_info.ihr_disabled, msg_info.bounce, msg_info.bounced, has_init_state, -1);
       }
       case block::gen::CommonMsgInfo::ext_in_msg_info: {
         block::gen::CommonMsgInfo::Record_ext_in_msg_info msg_info;
@@ -3034,9 +3041,10 @@ struct ToRawTransactions {
         }
         TRY_RESULT(dest, to_std_address(msg_info.dest));
         return tonlib_api::make_object<tonlib_api::raw_message>(
+            msg_hash,
             tonlib_api::make_object<tonlib_api::accountAddress>(),
             tonlib_api::make_object<tonlib_api::accountAddress>(std::move(dest)), 0, 0, 0, 0, std::move(body_hash),
-            get_data(""));
+            get_data(""), -1, -1, -1, has_init_state, to_balance(msg_info.import_fee).move_as_ok());
       }
       case block::gen::CommonMsgInfo::ext_out_msg_info: {
         block::gen::CommonMsgInfo::Record_ext_out_msg_info msg_info;
@@ -3046,8 +3054,9 @@ struct ToRawTransactions {
         TRY_RESULT(src, to_std_address(msg_info.src));
         auto created_lt = static_cast<td::int64>(msg_info.created_lt);
         return tonlib_api::make_object<tonlib_api::raw_message>(
+            msg_hash,
             tonlib_api::make_object<tonlib_api::accountAddress>(src),
-            tonlib_api::make_object<tonlib_api::accountAddress>(), 0, 0, 0, created_lt, std::move(body_hash), get_data(src));
+            tonlib_api::make_object<tonlib_api::accountAddress>(), 0, 0, 0, created_lt, std::move(body_hash), get_data(src), -1, -1, -1, has_init_state, -1);
       }
     }
 
