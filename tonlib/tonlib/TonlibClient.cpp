@@ -2958,7 +2958,7 @@ struct ToRawTransactions {
     auto body_cell = vm::CellBuilder().append_cellslice(*body).finalize();
     auto body_hash = body_cell->get_hash().as_slice().str();
     auto msg_hash = cell->get_hash().as_slice().str();
-    
+
     auto& init_state_cs = message.init.write();
     bool has_init_state = init_state_cs.fetch_ulong(1) == 1;
 
@@ -2975,35 +2975,34 @@ struct ToRawTransactions {
     auto get_data = [body = std::move(body), body_cell = std::move(body_cell),
                      init_state_cell = std::move(init_state_cell), this](td::Slice salt) mutable {
       tonlib_api::object_ptr<tonlib_api::msg_Data> data;
-      if (try_decode_messages_ && body->size() >= 32) {
-        auto type = static_cast<td::uint32>(body.write().fetch_long(32));
-        if (type == 0 || type == 0x2167da4b) {
-          td::Status status;
+      // if (try_decode_messages_ && body->size() >= 32 && static_cast<td::uint32>(body->prefetch_long(32)) <= 1) {
+      //   auto type = body.write().fetch_long(32);
+      //   td::Status status;
 
-          auto r_body_message = TRY_VM(vm::CellString::load(body.write()));
-          LOG_IF(WARNING, r_body_message.is_error()) << "Failed to parse a message: " << r_body_message.error();
+      //   auto r_body_message = vm::CellString::load(body.write());
+      //   LOG_IF(WARNING, r_body_message.is_error()) << "Failed to parse a message: " << r_body_message.error();
 
-          if (r_body_message.is_ok()) {
-            if (type == 0) {
-              data = tonlib_api::make_object<tonlib_api::msg_dataText>(r_body_message.move_as_ok());
-            } else {
-              auto encrypted_message = r_body_message.move_as_ok();
-              auto r_decrypted_message = [&]() -> td::Result<std::string> {
-                if (!private_key_) {
-                  return TonlibError::EmptyField("private_key");
-                }
-                TRY_RESULT(decrypted, SimpleEncryptionV2::decrypt_data(encrypted_message, private_key_.value(), salt));
-                return decrypted.data.as_slice().str();
-              }();
-              if (r_decrypted_message.is_ok()) {
-                data = tonlib_api::make_object<tonlib_api::msg_dataDecryptedText>(r_decrypted_message.move_as_ok());
-              } else {
-                data = tonlib_api::make_object<tonlib_api::msg_dataEncryptedText>(encrypted_message);
-              }
-            }
-          }
-        }
-      }
+      //   if (r_body_message.is_ok()) {
+      //     if (type == 0) {
+      //       data = tonlib_api::make_object<tonlib_api::msg_dataText>(r_body_message.move_as_ok());
+      //     } else {
+      //       LOG(ERROR) << "TRY DECRYPT";
+      //       auto encrypted_message = r_body_message.move_as_ok();
+      //       auto r_decrypted_message = [&]() -> td::Result<std::string> {
+      //         if (!private_key_) {
+      //           return TonlibError::EmptyField("private_key");
+      //         }
+      //         TRY_RESULT(decrypted, SimpleEncryptionV2::decrypt_data(encrypted_message, private_key_.value(), salt));
+      //         return decrypted.data.as_slice().str();
+      //       }();
+      //       if (r_decrypted_message.is_ok()) {
+      //         data = tonlib_api::make_object<tonlib_api::msg_dataDecryptedText>(r_decrypted_message.move_as_ok());
+      //       } else {
+      //         data = tonlib_api::make_object<tonlib_api::msg_dataEncryptedText>(encrypted_message);
+      //       }
+      //     }
+      //   }
+      // }
       if (!data) {
         data = tonlib_api::make_object<tonlib_api::msg_dataRaw>(to_bytes(std::move(body_cell)), to_bytes(std::move(init_state_cell)));
       }
@@ -5342,7 +5341,7 @@ td::Result<ton::BlockIdExt> to_block_id(const tonlib_api::ton_blockIdExt& blk) {
 void TonlibClient::get_config_param(int32_t param, int32_t mode, ton::BlockIdExt block, td::Promise<object_ptr<tonlib_api::configInfo>>&& promise) {
   std::vector<int32_t> params = { param };
   client_.send_query(ton::lite_api::liteServer_getConfigParams(mode, ton::create_tl_lite_block_id(block), std::move(params)),
-                  promise.wrap([param, block](auto r_config) -> td::Result<object_ptr<tonlib_api::configInfo>> { 
+                  promise.wrap([param, block](auto r_config) -> td::Result<object_ptr<tonlib_api::configInfo>> {
     auto state = block::check_extract_state_proof(block, r_config->state_proof_.as_slice(),
                                                   r_config->config_proof_.as_slice());
     if (state.is_error()) {
@@ -5363,7 +5362,7 @@ td::Status TonlibClient::do_request(const tonlib_api::getConfigParam& request,
   if (query_context_.block_id) {
     get_config_param(request.param_, request.mode_, query_context_.block_id.value(), std::move(promise));
   } else {
-    client_.with_last_block([this, promise = std::move(promise), param = request.param_, mode = request.mode_](td::Result<LastBlockState> r_last_block) mutable {       
+    client_.with_last_block([this, promise = std::move(promise), param = request.param_, mode = request.mode_](td::Result<LastBlockState> r_last_block) mutable {
       if (r_last_block.is_error()) {
         promise.set_error(r_last_block.move_as_error_prefix(TonlibError::Internal("get last block failed ")));
       } else {
@@ -5376,7 +5375,7 @@ td::Status TonlibClient::do_request(const tonlib_api::getConfigParam& request,
 
 void TonlibClient::get_config_all(int32_t mode, ton::BlockIdExt block, td::Promise<object_ptr<tonlib_api::configInfo>>&& promise) {
   client_.send_query(ton::lite_api::liteServer_getConfigAll(mode, ton::create_tl_lite_block_id(block)),
-                     promise.wrap([block](auto r_config) -> td::Result<object_ptr<tonlib_api::configInfo>> { 
+                     promise.wrap([block](auto r_config) -> td::Result<object_ptr<tonlib_api::configInfo>> {
     auto state = block::check_extract_state_proof(block, r_config->state_proof_.as_slice(),
                                                   r_config->config_proof_.as_slice());
     if (state.is_error()) {
@@ -5397,7 +5396,7 @@ td::Status TonlibClient::do_request(const tonlib_api::getConfigAll& request,
   if (query_context_.block_id) {
     get_config_all(request.mode_, query_context_.block_id.value(), std::move(promise));
   } else {
-    client_.with_last_block([this, promise = std::move(promise), mode = request.mode_](td::Result<LastBlockState> r_last_block) mutable {       
+    client_.with_last_block([this, promise = std::move(promise), mode = request.mode_](td::Result<LastBlockState> r_last_block) mutable {
       if (r_last_block.is_error()) {
         promise.set_error(r_last_block.move_as_error_prefix(TonlibError::Internal("get last block failed ")));
       } else {
@@ -5485,7 +5484,7 @@ td::Status TonlibClient::do_request(const tonlib_api::blocks_getTransactions& re
   bool check_proof = request.mode_ & 32;
   bool reverse_mode = request.mode_ & 64;
   bool has_starting_tx = request.mode_ & 128;
-  
+
   td::Bits256 start_addr;
   ton::LogicalTime start_lt;
   ton::lite_api::object_ptr<ton::lite_api::liteServer_transactionId3> after;
@@ -5493,7 +5492,7 @@ td::Status TonlibClient::do_request(const tonlib_api::blocks_getTransactions& re
     if (!request.after_) {
       return td::Status::Error("Missing field `after`");
     }
-    TRY_RESULT_ASSIGN(start_addr, to_bits256(request.after_->account_, "account"));    
+    TRY_RESULT_ASSIGN(start_addr, to_bits256(request.after_->account_, "account"));
     start_lt = request.after_->lt_;
     after = ton::lite_api::make_object<ton::lite_api::liteServer_transactionId3>(start_addr, start_lt);
   } else {
@@ -5585,7 +5584,7 @@ td::Status TonlibClient::do_request(const tonlib_api::blocks_getTransactions& re
                             return td::Status::Error("Unknown exception raised while verifying proof");
                           }
                         }
-                        
+
                         tonlib_api::blocks_transactions r;
                         r.id_ = to_tonlib_api(*bTxes->id_);
                         r.req_count_ = bTxes->req_count_;
@@ -5604,7 +5603,7 @@ td::Status TonlibClient::do_request(const tonlib_api::blocks_getTransactionsExt&
   bool check_proof = request.mode_ & 32;
   bool reverse_mode = request.mode_ & 64;
   bool has_starting_tx = request.mode_ & 128;
-  
+
   td::Bits256 start_addr;
   ton::LogicalTime start_lt;
   ton::lite_api::object_ptr<ton::lite_api::liteServer_transactionId3> after;
@@ -5612,7 +5611,7 @@ td::Status TonlibClient::do_request(const tonlib_api::blocks_getTransactionsExt&
     if (!request.after_) {
       return td::Status::Error("Missing field `after`");
     }
-    TRY_RESULT_ASSIGN(start_addr, to_bits256(request.after_->account_, "account"));    
+    TRY_RESULT_ASSIGN(start_addr, to_bits256(request.after_->account_, "account"));
     start_lt = request.after_->lt_;
     after = ton::lite_api::make_object<ton::lite_api::liteServer_transactionId3>(start_addr, start_lt);
   } else {
@@ -5633,7 +5632,7 @@ td::Status TonlibClient::do_request(const tonlib_api::blocks_getTransactionsExt&
                         if (block_id != create_block_id(bTxes->id_)) {
                           return td::Status::Error("Liteserver responded with wrong block");
                         }
-                        
+
                         block::BlockTransactionList list;
                         list.blkid = block_id;
                         list.transactions_boc = std::move(bTxes->transactions_);
